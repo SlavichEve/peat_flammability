@@ -1,0 +1,614 @@
+---
+title: "Smouldering and flaming fire in mined and unmined upland swamps"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(DHARMa)
+library(emmeans)
+library(parameters)
+library(table1)
+library(lubridate)
+library(ggpubr)
+```
+
+load data
+
+```{r}
+datadir <- "../data"
+locations<- read.csv(file.path(datadir, "Sod_locations.csv"))
+smouldering <-read.csv(file.path(datadir, "TM6_Complete_Sod_Data_main.csv"))
+flaming <- read.csv(file.path(datadir,"Sod_Data_flaming_moist_som_main.csv"))
+probes <- read.csv(file.path(datadir,"all_probes_2012_2017_ver6_for_comb.csv")) %>% 
+  mutate(date = dmy(date))
+
+```
+
+tabulate data
+
+```{r}
+table1(~grav_moist_dec2023+bd_g_per_cm3_May23+som_percent_Jan24|Fire_treat+binomial_iCone_burn_status,data=flaming)
+```
+
+### Explore: flaming fire  - BAL40
+
+```{r}
+burn_data_bal40 <- flaming %>% 
+  filter(!Sample=='MH CH 19') %>% # remove outlier
+  left_join(locations) %>% 
+  mutate(binomial_burn_status = binomial_iCone_burn_status,
+         grav_moist_percent = grav_moist_percent_dec2023,
+         som_percent = som_percent_Jan24,
+         bd_g_per_cm3 = bd_g_per_cm3_May23,
+         volumetric_wc = grav_moist_percent * bd_g_per_cm3) %>% 
+  filter(Fire_treat == "Low")
+```
+
+
+```{r}
+
+ft.burning_bal40 <- glm(binomial_burn_status ~ volumetric_wc , family=binomial, data = burn_data_bal40)
+
+summary(ft.burning_bal40)
+
+```
+
+Check assumptions
+```{r}
+sim= simulateResiduals(ft.burning_bal40)
+resid = residuals(sim, quantileFunction = qnorm, outlierValues = c(-7,7))
+plot(resid~fitted(ft.burning_bal40))
+
+
+```
+
+### Inference
+
+
+```{r}
+em_grav_bal40 = emmip(ft.burning_bal40, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_bal40,file="em_grav_BAL40.csv")
+
+BAL40_plot <- ggplot(em_grav_bal40, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of BAL40"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("")+
+ # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(c)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+BAL40_plot 
+# ggsave(plot = BAL40_plot, file = "../results/BAL40_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)
+```
+
+Choose a common time period across probes
+
+```{r}
+probes %>% 
+  filter(Probe_depth == 10) %>% 
+ggplot(aes(date, soil_moisture, color = Probe_id2))+
+  geom_path()+
+  facet_grid(Swamp ~ .)+
+  theme_classic()
+```
+
+Starting at when den_5 starts, 11/12/2016. 
+Only include ch and tt and 10cm depth
+
+```{r}
+probes_sub <- probes %>% 
+  filter(Probe_depth == 10,
+         veg_type != "bt",
+         veg_type != "wh",
+         Impact != "Unknown",
+         date > dmy("11/12/2016"),
+         !is.na(soil_moisture)) 
+
+
+table1(~Probe_id|Swamp+veg_type,data=probes_sub) #there are seven swamps that are included
+```
+
+
+We then look at the distribution of soil moisture for the undermined and reference sites.
+```{r}
+moisture_plot <- probes_sub %>% 
+  ggplot(aes(soil_moisture, fill = Impact))+
+  # geom_histogram(aes(y=..density..), binwidth = 1) + 
+  geom_histogram(aes(y=..count../sum(..count..)*365), binwidth = 1) +
+  facet_grid(Impact ~ .)+
+  scale_fill_manual(values=c("darkolivegreen", "khaki3"))+
+  theme_classic()+
+  theme(legend.position = "none")+
+    xlab("Volumetric water content (VWC %)")+
+    scale_x_continuous(breaks = seq(0, 125, by = 10), limits = c(0, 120))+
+  #ylab("Days per year")+
+  ylab(expression(atop(paste("Days per year for VWC (%)"), paste("at 10 cm soil depth"))))+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 10))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+    theme(plot.margin = unit(c(0,0,0,1), "cm"))
+
+moisture_plot
+
+```
+ 
+We can calculate an average probability of burning by multiplying the  soil moisture for each day by the probability of burning for that soil moisture, and averaging across the days. 
+
+
+```{r}
+probes_summary <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(em_grav_bal40) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) # averaging
+
+probes_summary
+```
+The average (per day) probability of flaming (BAL40) fire is doubled, from 1.1% for reference to 2.2% for undermined.
+
+
+We can then generate CI for the difference between Reference and Undermined probabilities by simulating from the posterior distribution of the model coefficients, and calculating a percentile confidence interval.
+
+```{r}
+library(mvtnorm)
+library(tidyr)
+K=100 #change to 1000 to get better estimate
+set.seed(111024)
+sim_pars<-rmvnorm(K,coef(ft.burning_bal40),vcov(ft.burning_bal40))
+
+burning_probs <- data.frame(Reference = rep(NA, K), Undermined = NA)
+
+for(i in 1:K){
+  nu <- sim_pars[i,1]+em_grav_bal40$volumetric_wc*sim_pars[i,2]
+  p <- 1/(1+exp(-nu))
+  sim_p <- data.frame(xvar =em_grav_bal40$volumetric_wc, yvar = p)
+  
+  burning_probs[i,] <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(sim_p) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) %>% 
+    pivot_wider(names_from = Impact, values_from = p_burn)
+}
+
+
+```
+
+
+```{r}
+# Difference
+
+c(probes_summary[2,2] / probes_summary[1,2],
+
+quantile((burning_probs$Undermined / burning_probs$Reference), probs = c(0.025, 0.975)))
+```
+
+The average (per day) probability of flaming (BAL40) fire is more than double (ratio = 2.11, 95%CI = 1.69 - 2.22), from 1.1% for reference to 2.2% for undermined.
+
+### Explore: flaming fire - BALFZ
+
+```{r}
+burn_data_fz <- flaming %>% 
+  filter(!Sample=='MH CH 19') %>% # remove outlier
+  left_join(locations) %>% 
+  mutate(binomial_burn_status = binomial_iCone_burn_status,
+         grav_moist_percent = grav_moist_percent_dec2023,
+         som_percent = som_percent_Jan24,
+         bd_g_per_cm3 = bd_g_per_cm3_May23,
+         volumetric_wc = grav_moist_percent * bd_g_per_cm3) %>% 
+  filter(Fire_treat == "High")
+```
+
+```{r}
+
+ft.burning_fz <- glm(binomial_burn_status ~ volumetric_wc , family=binomial, data = burn_data_fz)
+
+summary(ft.burning_fz)
+
+```
+
+Check assumptions
+```{r}
+sim= simulateResiduals(ft.burning_fz)
+resid = residuals(sim, quantileFunction = qnorm, outlierValues = c(-7,7))
+plot(resid~fitted(ft.burning_fz))
+burn_data_fz$resid = resid
+ggplot(burn_data_fz, aes(lat,long, colour = resid)) + 
+  geom_point() + 
+  facet_wrap(swamp~  veg, scales = "free")+
+  scale_colour_distiller(palette = "Spectral")+
+  theme_classic()
+
+```
+
+### Inference
+
+```{r}
+em_grav_fz = emmip(ft.burning_fz, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_fz,file="em_grav_fz.csv")
+
+BALFZ_plot <- ggplot(em_grav_fz, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data_fz, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of BALFZ"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("Volumetric water content (VWC) (%)")+
+  # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(d)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+BALFZ_plot 
+# ggsave(plot = BALFZ_plot, file = "../results/BALFZ_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)
+```
+
+
+```{r}
+
+
+probes_summary <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(em_grav_fz) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) # averaging
+
+probes_summary
+```
+
+The average (per day) probability of flaming (FZ) fire is more than double, from 8.1% for reference to 18.3% for undermined.
+
+We can then generate CI for the difference between Reference and Undermined probabilities by simulating from the posterior distribution of the model coefficients, and calculating a percentile confidence interval.
+
+
+```{r}
+library(mvtnorm)
+library(tidyr)
+K=100 #change to 1000 to get better estimate
+set.seed(111024)
+sim_pars<-rmvnorm(K,coef(ft.burning_fz),vcov(ft.burning_fz))
+
+burning_probs <- data.frame(Reference = rep(NA, K), Undermined = NA)
+
+for(i in 1:K){
+  nu <- sim_pars[i,1]+em_grav_fz$volumetric_wc*sim_pars[i,2]
+  p <- 1/(1+exp(-nu))
+  sim_p <- data.frame(xvar =em_grav_fz$volumetric_wc, yvar = p)
+  
+  burning_probs[i,] <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(sim_p) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) %>% 
+    pivot_wider(names_from = Impact, values_from = p_burn)
+}
+
+
+```
+
+
+```{r}
+# Difference
+
+c(probes_summary[2,2] / probes_summary[1,2],
+
+quantile((burning_probs$Undermined / burning_probs$Reference), probs = c(0.025, 0.975)))
+```
+The average (per day) probability of burning is more than double (ratio = 2.27, 95%CI = 1.99 - 2.29), from 8.1% for reference to 18.3% for undermined.
+
+### Explore: smouldering fire 
+
+
+```{r}
+burn_data_smould <- smouldering %>% 
+  filter(!Sample=='MH CH 19') %>% # remove outlier
+  left_join(locations) %>% 
+  mutate(volumetric_wc = grav_moist_percent * bd_g_per_cm3)
+```
+
+```{r}
+
+ft.burning_smould <- glm(binomial_burn_status ~ volumetric_wc , family=binomial, data = burn_data_smould)
+
+summary(ft.burning_smould)
+
+```
+
+Check assumptions
+```{r}
+sim= simulateResiduals(ft.burning_smould)
+resid = residuals(sim, quantileFunction = qnorm, outlierValues = c(-7,7))
+plot(resid~fitted(ft.burning_smould))
+burn_data_smould$resid = resid
+ggplot(burn_data_smould, aes(lat,long, colour = resid)) +
+  geom_point() +
+  facet_wrap(swamp~  veg, scales = "free")+
+  scale_colour_distiller(palette = "Spectral")+
+  theme_classic()
+
+
+```
+
+### Inference
+
+```{r}
+em_grav_smould = emmip(ft.burning_smould, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_smould,file="em_grav_smould.csv")
+
+smould_plot <- ggplot(em_grav_smould, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data_smould, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of smouldering"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("")+
+ # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(b)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+smould_plot 
+# ggsave(plot = smould_plot, file = "../results/smould_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)#tells us what the value and CI are when grav moist is 10%
+```
+
+### Experimental 
+
+We can calculate an average probability of burning by multiplying the  soil moisture for each day by the probability of burning for that soil moisture, and averaging across the days. 
+
+```{r}
+probes_summary <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(em_grav_smould) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) # averaging
+
+probes_summary
+```
+The average (per day) probability of burning more than doubles, from 3.1% for reference to 6.8% for undermined.
+
+
+We can then generate CI for the difference between Reference and Undermined probabilities by simulating from the posterior distribution of the model coefficients, and calculating a percentile confidence interval.
+
+```{r}
+library(mvtnorm)
+library(tidyr)
+K=100 #change to 1000 to get better estimate
+set.seed(111024)
+sim_pars<-rmvnorm(K,coef(ft.burning_smould),vcov(ft.burning_smould))
+
+burning_probs <- data.frame(Reference = rep(NA, K), Undermined = NA)
+
+for(i in 1:K){
+  nu <- sim_pars[i,1]+em_grav_smould$volumetric_wc*sim_pars[i,2]
+  p <- 1/(1+exp(-nu))
+  sim_p <- data.frame(xvar =em_grav_smould$volumetric_wc, yvar = p)
+  
+  burning_probs[i,] <- probes_sub %>% 
+  mutate(xvar = round(soil_moisture)) %>% #round to nearest integer
+  group_by(Impact, xvar) %>% 
+  count() %>% # count how many days for each soil moisture value
+  left_join(sim_p) %>% 
+  mutate(pn_burn = yvar * n) %>% # multiply this histogram by probability of burning
+  group_by(Impact) %>% 
+  summarise(n = sum(n), probn = sum(pn_burn)) %>% 
+  transmute(Impact, p_burn = probn/n) %>% 
+    pivot_wider(names_from = Impact, values_from = p_burn)
+}
+
+
+```
+
+
+```{r}
+# Difference
+
+c(probes_summary[2,2] / probes_summary[1,2],
+
+quantile((burning_probs$Undermined / burning_probs$Reference), probs = c(0.025, 0.975)))
+```
+
+The average (per day) probability of burning is more than double (ratio = 2.18, 95%CI = 1.96 - 2.25), from 3.1% for reference to 6.8% for undermined.
+
+## Combine all fire types in a plot
+
+
+```{r}
+# moisture_density <- 
+#   ggplot(probes_sub, aes(soil_moisture, fill = Impact)) + geom_density(alpha = 0.2)
+# moisture_density
+
+moisture_plot2 <- probes_sub %>% 
+  ggplot(aes(soil_moisture, fill = Impact))+
+  # geom_histogram(aes(y=..density..), binwidth = 1) + 
+  geom_histogram(alpha = 0.5, aes(y=..count../sum(..count..)*365), binwidth = 1, position ='identity') +
+  scale_fill_manual(values=c("darkolivegreen", "orange"))+
+  #facet_grid(Impact ~ .)+
+  theme_classic()+
+  theme(legend.position = "none")+
+    #xlab("Volumetric water content (%)")+ the next line silences the x axis label
+  xlab("")+
+    scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0, 125))+
+    scale_y_continuous(breaks = seq(0, 8, by =1), limits = c(0,8))+
+  ylab(expression(atop(paste("Mean number of days per year"), paste("for VWC (%) value at 10 cm depth"))))+
+    theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  theme(axis.title.y = element_text(margin = margin(r = 15)))+
+  theme(axis.text.y = element_text(margin = margin(0,5,0,0)))+
+  labs(title = "(a)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))#+
+    #theme(plot.margin = unit(c(0,0,0,1), "cm"))
+
+moisture_plot2
+#ggarrange(smould_plot, moisture_plot2, nrow = 2)
+
+```
+
+Smouldering plot
+```{r}
+em_grav_smould = emmip(ft.burning_smould, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_smould,file="em_grav_smould.csv")
+
+smould_plot <- ggplot(em_grav_smould, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data_smould, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of smouldering"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("")+
+ # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(b)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+smould_plot 
+# ggsave(plot = smould_plot, file = "../results/smould_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)#tells us what the value and CI are when grav moist is 10%
+```
+
+BAL40 plot
+```{r}
+em_grav_bal40 = emmip(ft.burning_bal40, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_bal40,file="em_grav_BAL40.csv")
+
+BAL40_plot <- ggplot(em_grav_bal40, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of BAL40"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("")+
+ # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(c)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+BAL40_plot 
+# ggsave(plot = BAL40_plot, file = "../results/BAL40_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)#tells us what the value and CI are when grav moist is 10%
+```
+
+BalFZ plot
+```{r}
+em_grav_fz = emmip(ft.burning_fz, ~ volumetric_wc , type = "response",  CIs = TRUE,
+      at = list(volumetric_wc = seq(0, 150,by=1)), plotit = FALSE)
+
+
+
+
+#write.csv(em_grav_fz,file="em_grav_fz.csv")
+
+BALFZ_plot <- ggplot(em_grav_fz, aes(volumetric_wc, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  #geom_point(colour = "grey25", data = burn_data_fz, aes(volumetric_wc,binomial_burn_status)) +
+  ylab(expression(atop(paste("Probability of BALFZ"), paste("fire (+/-95% CI)"))))+
+  scale_x_continuous(breaks = seq(0, 120, by = 10), limits = c(0,125))+
+  xlab("Volumetric water content (VWC) (%)")+
+  # geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 12))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  labs(title = "(d)")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+BALFZ_plot 
+# ggsave(plot = BALFZ_plot, file = "../results/BALFZ_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
+  #geom_vline(xintercept = 10)#tells us what the value and CI are when grav moist is 10%
+```
+
+Combined figure
+
+```{r, fig.width = 6, fig.height=5}
+comb_vmcBAL40_FZ_smould <- ggarrange(moisture_plot2, smould_plot, BAL40_plot, BALFZ_plot, nrow = 4)
+
+comb_vmcBAL40_FZ_smould
+
+ggsave(plot = comb_vmcBAL40_FZ_smould, file = "../results/comb_vmcBAL40_FZ_smould_plot3.tiff" , width = 200, height = 280, units = "mm")
+#ggsave(plot = comb_vmcBAL40_FZ_smould, file = "../results/comb_vmcBAL40_FZ_smould_plot3.svg" , width = 200, height = 280, units = "mm")
+```
+
+
