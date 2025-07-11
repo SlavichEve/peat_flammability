@@ -1,0 +1,180 @@
+---
+title: "Smouldering fire in upland swamp soils"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Smouldering fire
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(DHARMa)
+library(emmeans)
+library(parameters)
+library(table1)
+library(MuMIn)
+```
+
+
+Load data
+
+```{r}
+datadir <- "../data"
+locations<- read.csv(file.path(datadir, "Sod_locations.csv"))
+smouldering <-read.csv(file.path(datadir, "TM5_Complete_Sod_Data_main.csv"))
+
+```
+
+
+Clean data and tabulate
+
+```{r}
+som_gravmoist <- smouldering %>% 
+  filter(!Sample=='MH CH 19') %>% 
+  left_join(locations) %>% 
+  mutate(swamp = substr(Sample,1, 3),
+         veg = trimws(substr(Sample,4, 6)),
+         bd_mg_per_cm3 = bd_g_per_cm3*1000, #mg
+         bd_mg_cat = cut(bd_mg_per_cm3, breaks = c(0,250, 400, 2000)),
+         bd_mg_cat = factor(bd_mg_cat, labels = c(200,300,500))) %>% 
+    dplyr::select(binomial_burn_status, grav_moist_percent , som_percent, bd_mg_per_cm3, swamp, veg, lat, long, bd_mg_cat) 
+
+table1(~grav_moist_percent + som_percent+ bd_mg_per_cm3 |binomial_burn_status, data = som_gravmoist)
+```
+
+
+### Explore
+
+Plot against burning status.
+
+```{r}
+ggplot(som_gravmoist, aes(bd_mg_per_cm3, binomial_burn_status))+
+  geom_point()
+
+ggplot(som_gravmoist, aes(grav_moist_percent, binomial_burn_status))+
+  geom_point()
+
+ggplot(som_gravmoist, aes(som_percent, binomial_burn_status))+
+  geom_point()
+```
+We expect grav_moist_percent will be strongest predictor.
+
+### Variable selection, forward stepwise
+
+We do this manually  rather than using `stepAIC` as we were getting warnings and wanted to know where they were coming from. We changed from used `AIC` to `AICc` due to reviewer comments, it made no difference to the model chosen.
+
+```{r}
+cor(som_gravmoist[,c(2,3,4)])
+```
+The largest correlation is 0.73 so we aren't worried about multicollinearity.
+
+Models with one predictor:
+
+```{r}
+base_mod_smould <- glm(binomial_burn_status ~1, family=binomial, data = som_gravmoist)
+base_mod_smould_grav <- glm(binomial_burn_status ~  + grav_moist_percent, family=binomial, data = som_gravmoist)
+base_mod_smould_som <- glm(binomial_burn_status ~  +som_percent, family=binomial, data = som_gravmoist)
+base_mod_smould_bd <- glm(binomial_burn_status ~  + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
+
+AICc(base_mod_smould, base_mod_smould_grav, base_mod_smould_som, base_mod_smould_bd)
+```
+
+grav_moist_percent is best of these models. We keep adding variables
+
+```{r}
+base_mod_smould_grav_som <- glm(binomial_burn_status ~  grav_moist_percent + som_percent, family=binomial, data = som_gravmoist)
+base_mod_smould_grav_bd <- glm(binomial_burn_status ~  grav_moist_percent + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
+
+AICc(base_mod_smould_grav, base_mod_smould_grav_som, base_mod_smould_grav_bd)
+```
+
+Lowest AIC includes grav and bd, so we keep going to see if som improves model. 
+
+```{r}
+base_mod_smould_grav_bd_som <- glm(binomial_burn_status ~  grav_moist_percent  +bd_mg_per_cm3+som_percent, family=binomial, data = som_gravmoist)
+AICc(base_mod_smould_grav_bd, base_mod_smould_grav_bd_som)
+
+```
+
+Lowest AIC is grav and bd only. 
+
+
+Check assumptions
+```{r}
+sim= simulateResiduals(base_mod_smould_grav_bd)
+resid = residuals(sim, quantileFunction = qnorm, outlierValues = c(-7,7))
+plot(resid~fitted(base_mod_smould_grav_bd))
+
+```
+Residuals are okay. 
+
+
+The model has warnings about 'fitted probabilities numerically 0 or 1 occurred', this is often perfect separation. We look at standard errors of coefficients. 
+
+```{r}
+summary(base_mod_smould_grav_bd_som)
+```
+Standard errors are reasonable. For large values of grav, the probability of burning is appropriately very near 0 (see plots below), so we don't believe there is perfect separation. 
+
+
+### Inference
+
+Calculate odds ratios. 
+
+```{r message=FALSE, warning=FALSE}
+parameters(base_mod_smould_grav_bd, exponentiate = T, ci_method  = "profile", digits = 4)
+```
+
+Calculate predictions
+
+```{r}
+ems_full_smould = emmip(base_mod_smould_grav_bd, ~ grav_moist_percent +  bd_mg_per_cm3, type = "response",  CIs = TRUE,
+      at = list(grav_moist_percent = seq(0,500,by=5),
+                bd_mg_per_cm3 = c(200, 300, 500)), plotit = FALSE)
+
+ems_full_smould$bd_mg_cat <- ems_full_smould$bd_mg_per_cm3
+
+ems_full_smould$bd_mg_per_cm3 = factor(ems_full_smould$bd_mg_per_cm3)
+write.csv(ems_full_smould,file="../results/pred_smould.csv")
+
+ems_full_smould %>% 
+  filter(grav_moist_percent %in% c(50, 100, 150)) %>% 
+  transmute(grav_moist_percent, 
+            bd_mg_per_cm3,
+            pred_burn_prob = round(yvar, 4),
+            LCL = round(LCL, 4),
+            UCL = round(UCL,4)) 
+  
+```
+
+Plot.
+
+```{r}
+#modify facet labels
+bd_names <- as_labeller(
+  c('200' = "(a) 200 mg/cm3", '300' = "(b) 300 mg/cm3", '500' = "(c) 500 mg/cm3"))
+
+
+smould_plot <- ggplot(ems_full_smould, aes(grav_moist_percent, yvar)) +
+  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.5, fill = "lightgrey")+
+  geom_line()+
+  geom_point(colour = "grey25", data = som_gravmoist, aes(grav_moist_percent,binomial_burn_status)) +
+  xlab("Gravimetric water content (%)")+
+  ylab(expression(atop(paste("Probability of smouldering fire"), paste("in swamp substrate (+/-95% CI)"))))+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14), strip.background = element_rect(colour="white", fill="white"))+
+  theme(plot.title = element_text(size = 14))+
+  theme(strip.text = element_text(size = 14))+
+  theme(legend.text = element_text(size = 12))+
+  xlim(0,600)+
+  facet_grid(~bd_mg_cat, labeller = bd_names)+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+smould_plot
+ggsave(plot = smould_plot, file = "../results/smould_plot.tiff" , width = 180, height = 100, units = "mm", device = "tiff")
+```
+Note : The plots contain data from 0-250, 250-400, 400-max but predictions at 200, 300 and 500
+
+
