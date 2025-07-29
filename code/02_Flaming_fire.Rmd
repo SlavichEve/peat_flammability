@@ -1,5 +1,5 @@
 ---
-title: "Smouldering and flaming fire in upland swamp soils"
+title: "Flaming fire in upland swamp soils"
 output:
   html_document:
     df_print: paged
@@ -72,19 +72,19 @@ We expect grav_moist_percent will be strongest predictor.
 Due to small sample size, we will include only one variable in model to predict burning. Use AICc to choose variable. 
 
 ```{r}
-base_mod_smould <- glm(binomial_burn_status ~1, family=binomial, data = som_gravmoist)
-base_mod_smould_grav <- glm(binomial_burn_status ~  + grav_moist_percent, family=binomial, data = som_gravmoist)
-base_mod_smould_som <- glm(binomial_burn_status ~  +som_percent, family=binomial, data = som_gravmoist)
-base_mod_smould_bd <- glm(binomial_burn_status ~  + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
+base_mod_flam <- glm(binomial_burn_status ~1, family=binomial, data = som_gravmoist)
+base_mod_flam_grav <- glm(binomial_burn_status ~  + grav_moist_percent, family=binomial, data = som_gravmoist)
+base_mod_flam_som <- glm(binomial_burn_status ~  +som_percent, family=binomial, data = som_gravmoist)
+base_mod_flam_bd <- glm(binomial_burn_status ~  + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
 
-AICc(base_mod_smould, base_mod_smould_grav, base_mod_smould_som, base_mod_smould_bd)
+AICc(base_mod_flam, base_mod_flam_grav, base_mod_flam_som, base_mod_flam_bd)
 ```
 
 grav is by far the best predictor
 
 
 ```{r}
-BAL40_mod <- base_mod_smould_grav
+BAL40_mod <- base_mod_flam_grav
 ```
 
 
@@ -119,7 +119,7 @@ Calculate predictions
 
 ```{r}
 ems_BAL40 = emmip(BAL40_mod, ~ grav_moist_percent, type = "response",  CIs = TRUE,
-      at = list(grav_moist_percent = seq(0,500,by=5)), plotit = FALSE)
+      at = list(grav_moist_percent = seq(0,500,by=1)), plotit = FALSE)
 
 write.csv(ems_BAL40,file="../results/prob_BAL40.csv")
 
@@ -141,7 +141,7 @@ BAL40_plot <- ggplot(ems_BAL40, aes(grav_moist_percent, yvar)) +
   geom_line()+
   geom_point(colour = "grey25", data = som_gravmoist, aes(grav_moist_percent,binomial_burn_status)) +
   xlab("Gravimetric water content (%)")+
-  ylab(expression(atop(paste("Probability of smouldering fire"), paste("in swamp substrate (+/-95% CI)"))))+
+  ylab(expression(atop(paste("Probability of BAL40 flamining fire"), paste("in swamp substrate (+/-95% CI)"))))+
   theme(axis.text = element_text(size = 12))+
   theme(axis.title = element_text(size = 14), strip.background = element_rect(colour="white", fill="white"))+
   theme(plot.title = element_text(size = 14))+
@@ -186,18 +186,18 @@ We expect grav_moist_percent will be strongest predictor.
 Due to small sample size, we will include only one variable in model to predict burning. Use AICc to choose variable. 
 
 ```{r}
-base_mod_smould <- glm(binomial_burn_status ~1, family=binomial, data = som_gravmoist)
-base_mod_smould_grav <- glm(binomial_burn_status ~  + grav_moist_percent, family=binomial, data = som_gravmoist)
-base_mod_smould_som <- glm(binomial_burn_status ~  +som_percent, family=binomial, data = som_gravmoist)
-base_mod_smould_bd <- glm(binomial_burn_status ~  + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
+base_mod_flam <- glm(binomial_burn_status ~1, family=binomial, data = som_gravmoist)
+base_mod_flam_grav <- glm(binomial_burn_status ~  + grav_moist_percent, family=binomial, data = som_gravmoist)
+base_mod_flam_som <- glm(binomial_burn_status ~  +som_percent, family=binomial, data = som_gravmoist)
+base_mod_flam_bd <- glm(binomial_burn_status ~  + bd_mg_per_cm3, family=binomial, data = som_gravmoist)
 
-AICc(base_mod_smould, base_mod_smould_grav, base_mod_smould_som, base_mod_smould_bd)
+AICc(base_mod_flam, base_mod_flam_grav, base_mod_flam_som, base_mod_flam_bd)
 ```
 
 grav is by far the best predictor
 
 ```{r}
-BALFZ_mod <- base_mod_smould_grav
+BALFZ_mod <- base_mod_flam_grav
 ```
 
 
@@ -222,7 +222,7 @@ Calculate predictions
 
 ```{r}
 ems_BALFZ = emmip(BALFZ_mod, ~ grav_moist_percent, type = "response",  CIs = TRUE,
-      at = list(grav_moist_percent = seq(0,500,by=5)), plotit = FALSE)
+      at = list(grav_moist_percent = seq(0,500,by=1)), plotit = FALSE)
 
 write.csv(ems_BALFZ,file="../results/prob_BALFZ.csv")
 
@@ -243,7 +243,7 @@ BALFZ_plot <- ggplot(ems_BALFZ, aes(grav_moist_percent, yvar)) +
   geom_line()+
   geom_point(colour = "grey25", data = som_gravmoist, aes(grav_moist_percent,binomial_burn_status)) +
   xlab("Gravimetric water content (%)")+
-  ylab(expression(atop(paste("Probability of smouldering fire"), paste("in swamp substrate (+/-95% CI)"))))+
+  ylab(expression(atop(paste("Probability of flaming BALFZ fire"), paste("in swamp substrate (+/-95% CI)"))))+
   theme(axis.text = element_text(size = 12))+
   theme(axis.title = element_text(size = 14), strip.background = element_rect(colour="white", fill="white"))+
   theme(plot.title = element_text(size = 14))+
@@ -256,9 +256,9 @@ BALFZ_plot
 ggsave(plot = BALFZ_plot, file = "../results/BALFZ_plot.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
 ```
 
-## Combined fire analysis - BALFZ
+## Combined fire analysis 
 
-Does temperature affect probability of burning?
+Does fire intensity affect probability of burning?
 
 
 ### Model
@@ -318,36 +318,6 @@ ems_flaming_comb %>%
 ```
 
 
-
-
-
-```{r}
-
-BAL40andFZ_plot <- ggplot(ems_flaming_comb, aes(grav_moist_percent, yvar, color= Fire_treat, fill = Fire_treat)) +
-  geom_ribbon(aes(ymin = LCL, ymax = UCL), alpha = 0.2, linetype="dashed")+ #fill = "darkgoldenrod3"
-  geom_line()+
-  geom_point( data = burn_data, aes(grav_moist_percent,binomial_burn_status)) + #colour = "grey25",
-  xlab("Gravimetric water content (%)")+
-  ylab(expression(atop(paste("Probability of flaming fire in swamp substrate"), paste("(+/-95% CI)"))))+
-  #geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
-  scale_fill_manual(values = c("darkgrey", "lightgrey"),labels=c("High intensity fire (BALFZ)", "Lower intensity fire (BAL40)"))+
-  theme(legend.position = c(.7,.7))+
-  scale_colour_manual(values = c("darkgrey", "lightgrey"), guide="none")+
-  guides(fill = guide_legend(override.aes = list(colour = c("darkgrey", "lightgrey"))))+
-  theme(axis.text = element_text(size = 12))+
-  theme(axis.title = element_text(size = 14))+
-  theme(plot.title = element_text(size = 14))+
-  theme(strip.text = element_text(size = 14))+
-  theme(legend.text = element_text(size = 12))+
-  scale_x_continuous(breaks = seq(0, 900, by = 100))+
-  theme(legend.title = element_blank())+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-        panel.background = element_blank(), axis.line = element_line(colour = "black"))
-BAL40andFZ_plot
- ggsave(plot = BAL40andFZ_plot, file = "../results/BAL40andFZ_plot2.tiff" , width = 180, height = 150, units = "mm", device = "tiff")
-  #geom_vline(xintercept = 10)#tells us what the value and CI are when grav moist is 10%
-```
-
 ```{r}
 
 
@@ -358,7 +328,7 @@ BAL40andFZ_plot_updated <- ggplot(ems_flaming_comb, aes(grav_moist_percent, yvar
   xlab("Gravimetric water content (%)")+
   ylab(expression(atop(paste("Probability of flaming fire in swamp substrate"), paste("(+/-95% CI)"))))+
   #geom_vline(xintercept = 50)+ #tells us what the value and CI are when grav moist is 50%
-  scale_fill_manual(values = c("coral4", "brown1"),labels=c("Wildfire intensity (BALFZ)", "Moderate-intensity (BAL40)"))+
+  scale_fill_manual(values = c("coral4", "brown1"),labels=c("Moderate-intensity (BAL-40)", "Wildfire intensity (BAL-FZ)"))+
   theme(legend.position = c(.7,.7))+
   scale_colour_manual(values = c("coral4", "brown1"), guide="none")+
   guides(fill = guide_legend(override.aes = list(colour = c("coral4", "brown1"))))+
